@@ -1,11 +1,12 @@
 from datetime import datetime
 
-from flask import Flask, request, redirect, abort
-from flask_admin import Admin, AdminIndexView
+from flask import Flask, request, Response
+from flask_admin.base import Admin, AdminIndexView, expose
 from flask_sqlalchemy import SQLAlchemy
 from flask_admin.contrib.sqla import ModelView
 from flask_cors import CORS
 from flask_basicauth import BasicAuth
+from werkzeug.exceptions import HTTPException
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
@@ -32,14 +33,35 @@ class Connection(db.Model):
     speed = db.Column(db.String(128))
 
 
+class AuthException(HTTPException):
+    def __int__(self, message):
+        super().__init__(message, Response(
+            message, 401,
+            {'WWW-Authenticate': 'Basic realm="Login Required"'}
+        ))
+
+
 class ConnectionModelView(ModelView):
     column_list = ['id', 'date_created', 'name', 'phone', 'tariff', 'speed']
     column_labels = {'id': 'ID', 'date_created': 'Created Date'}
     column_searchable_list = ['id', 'tariff', 'phone', 'speed']
     column_sortable_list = ['id', 'date_created', 'name', 'phone', 'tariff', 'speed']
 
+    def is_accessible(self):
+        return basic_auth.authenticate()
 
-admin = Admin(app, name='MTS', template_mode='bootstrap3')
+    def inaccessible_callback(self, name, **kwargs):
+        return basic_auth.challenge()
+
+
+class SecureAdminIndexView(AdminIndexView):
+    @expose()
+    @basic_auth.required
+    def index(self):
+        return super(SecureAdminIndexView, self).index()
+
+
+admin = Admin(app, name='MTS', template_mode='bootstrap3', index_view=SecureAdminIndexView())
 admin.add_view(ConnectionModelView(Connection, db.session))
 
 with app.app_context():
